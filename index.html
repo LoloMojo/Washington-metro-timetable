@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Washington Metro Timetable · Arlington ⇄ DC</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="app">
+
+        <!-- ---------- Header ---------- -->
+        <header class="app-header">
+            <div class="brand">
+                <span class="roundel" aria-hidden="true">M</span>
+                <div>
+                    <h1>Washington Metro Timetable</h1>
+                    <p class="subtitle">Arlington ⇄ DC · live next trains + published-headway schedule</p>
+                </div>
+            </div>
+            <div class="header-meta">
+                <div class="clock" id="clock">--:--:--</div>
+                <div class="clock-label">Washington, DC time</div>
+                <span class="badge" id="sourceBadge" data-source="idle">idle</span>
+            </div>
+        </header>
+
+        <!-- ---------- API Key Setup ---------- -->
+        <section class="api-setup">
+            <details>
+                <summary>🔑 WMATA API key &amp; data sources</summary>
+                <p class="setup-info">
+                    Grab a free key at
+                    <a href="https://developer.wmata.com/" target="_blank" rel="noopener">developer.wmata.com</a>
+                    (subscribe to the <strong>Default Tier</strong>), then paste it below. Without a key the page
+                    uses WMATA's public demo key, then the keyless MetroPulse endpoint, then the built-in
+                    schedule model.
+                </p>
+                <div class="api-key-row">
+                    <input type="password" id="apiKeyInput" placeholder="Paste your WMATA api_key" autocomplete="off">
+                    <button id="saveKeyBtn" class="btn-secondary" type="button">Save key</button>
+                    <button id="clearKeyBtn" class="btn-ghost" type="button">Use demo key</button>
+                </div>
+                <p class="setup-info small" id="keyStatus">Using WMATA public demo key (rate limited).</p>
+            </details>
+        </section>
+
+        <!-- ---------- Tabs ---------- -->
+        <nav class="tabs" role="tablist" aria-label="Timetable views">
+            <button class="tab is-active" role="tab" type="button" data-tab="live" aria-selected="true">Live board</button>
+            <button class="tab" role="tab" type="button" data-tab="timetable" aria-selected="false">Timetable</button>
+            <button class="tab" role="tab" type="button" data-tab="headways" aria-selected="false">Headways</button>
+            <button class="tab" role="tab" type="button" data-tab="alerts" aria-selected="false">Alerts</button>
+        </nav>
+
+        <main>
+
+            <!-- ---------- Live board ---------- -->
+            <section class="panel tab-panel" id="panel-live" role="tabpanel" aria-label="Live board">
+                <div class="toolbar">
+                    <label class="field">
+                        <span>Station</span>
+                        <select id="stationSelect"></select>
+                    </label>
+                    <label class="field">
+                        <span>Direction</span>
+                        <select id="directionSelect">
+                            <option value="">All destinations</option>
+                        </select>
+                    </label>
+                    <div class="field field-grow">
+                        <span>Lines</span>
+                        <div class="chip-row" id="lineChips" role="group" aria-label="Filter by line"></div>
+                    </div>
+                    <div class="field field-actions">
+                        <span aria-hidden="true">&nbsp;</span>
+                        <div class="btn-row">
+                            <button id="refreshBtn" type="button">⟳ Refresh</button>
+                            <button id="keylessBtn" class="btn-secondary" type="button"
+                                    title="Try WMATA MetroPulse — works without an API key">Keyless</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-line">
+                    <span id="liveStatus" aria-live="polite">Loading live trains…</span>
+                    <span class="status-meta" id="liveMeta"></span>
+                </div>
+
+                <div class="board" id="board" aria-live="polite" aria-busy="false"></div>
+
+                <p class="hint">
+                    Source: WMATA <code>StationPrediction</code>. The board polls every 25&nbsp;seconds and pauses
+                    when this tab is hidden. <code>Min</code> values of <code>""</code> (no prediction) are dropped.
+                </p>
+            </section>
+
+            <!-- ---------- Timetable ---------- -->
+            <section class="panel tab-panel is-hidden" id="panel-timetable" role="tabpanel" aria-label="Scheduled timetable">
+                <div class="toolbar">
+                    <label class="field">
+                        <span>From</span>
+                        <select id="originSelect"></select>
+                    </label>
+                    <label class="field">
+                        <span>To</span>
+                        <select id="destSelect"></select>
+                    </label>
+                    <label class="field">
+                        <span>Date</span>
+                        <input type="date" id="dateInput">
+                    </label>
+                    <label class="field">
+                        <span>Service</span>
+                        <select id="dayTypeSelect">
+                            <option value="auto">Auto (from date)</option>
+                            <option value="weekday">Weekday</option>
+                            <option value="saturday">Saturday</option>
+                            <option value="sunday">Sunday</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Window</span>
+                        <span class="time-range">
+                            <input type="time" id="fromInput" value="06:00">
+                            <em>–</em>
+                            <input type="time" id="toInput" value="09:00">
+                        </span>
+                    </label>
+                    <div class="field field-actions">
+                        <span aria-hidden="true">&nbsp;</span>
+                        <div class="btn-row">
+                            <button id="generateBtn" type="button">Generate</button>
+                            <button id="swapBtn" class="btn-ghost" type="button">⇄ Swap</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-line">
+                    <span id="ttSummary">Choose an origin and destination.</span>
+                    <span class="status-meta" id="ttMeta"></span>
+                </div>
+
+                <div class="stats" id="ttStats"></div>
+                <div class="tt-list" id="ttList"></div>
+                <div class="tt-hourly" id="ttHourly"></div>
+
+                <p class="hint">
+                    Generated from WMATA's published weekday/weekend headways plus per-segment run times, so it
+                    reflects the timetable you would get from the rail GTFS feed under normal service. Holiday
+                    schedules, single-tracking and short-turns are not modelled — cross-check the live board.
+                </p>
+            </section>
+
+            <!-- ---------- Headways ---------- -->
+            <section class="panel tab-panel is-hidden" id="panel-headways" role="tabpanel" aria-label="Headways and service spans">
+                <div class="toolbar">
+                    <label class="field">
+                        <span>Service day</span>
+                        <select id="headwayDaySelect">
+                            <option value="weekday">Weekday</option>
+                            <option value="saturday">Saturday</option>
+                            <option value="sunday">Sunday</option>
+                        </select>
+                    </label>
+                    <div class="field field-actions">
+                        <span aria-hidden="true">&nbsp;</span>
+                        <div class="btn-row">
+                            <button id="liveHeadwayBtn" class="btn-secondary" type="button">Live headways (keyless)</button>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="hint">
+                    Metrorail runs on frequency, not point-to-point timetables. Times below are the headways used
+                    by the timetable generator; spans past midnight are marked <code>+1</code>.
+                </p>
+
+                <div id="headwayTable"></div>
+                <div class="live-headway" id="liveHeadway"></div>
+            </section>
+
+            <!-- ---------- Alerts ---------- -->
+            <section class="panel tab-panel is-hidden" id="panel-alerts" role="tabpanel" aria-label="Service alerts">
+                <div class="toolbar">
+                    <div class="field field-grow">
+                        <span>Options</span>
+                        <label class="check">
+                            <input type="checkbox" id="elevatorToggle">
+                            <span>Include elevator / escalator outages</span>
+                        </label>
+                    </div>
+                    <div class="field field-actions">
+                        <span aria-hidden="true">&nbsp;</span>
+                        <div class="btn-row">
+                            <button id="alertsRefreshBtn" type="button">⟳ Refresh alerts</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-line">
+                    <span id="alertsStatus">Not loaded yet.</span>
+                    <span class="status-meta" id="alertsMeta"></span>
+                </div>
+
+                <div id="alertList" class="alert-list"></div>
+            </section>
+
+            <!-- ---------- Station reference ---------- -->
+            <details class="panel reference">
+                <summary>Station codes — Arlington &amp; the Blue/Orange/Silver trunk</summary>
+                <div class="reference-grid">
+                    <table class="mini-table">
+                        <caption>Arlington, VA</caption>
+                        <thead><tr><th>Code</th><th>Station</th><th>Lines</th></tr></thead>
+                        <tbody>
+                            <tr><td>C05</td><td>Rosslyn</td><td>Blue/Orange/Silver</td></tr>
+                            <tr><td>C06</td><td>Arlington Cemetery</td><td>Blue</td></tr>
+                            <tr><td>C07</td><td>Pentagon</td><td>Blue/Yellow</td></tr>
+                            <tr><td>C08</td><td>Pentagon City</td><td>Blue/Yellow</td></tr>
+                            <tr><td>C09</td><td>Crystal City</td><td>Blue/Yellow</td></tr>
+                            <tr><td>C10</td><td>Reagan National Airport</td><td>Blue/Yellow</td></tr>
+                            <tr><td>C12</td><td>Braddock Rd</td><td>Blue/Yellow</td></tr>
+                            <tr><td>C13</td><td>King St-Old Town</td><td>Blue/Yellow</td></tr>
+                            <tr><td>C14</td><td>Eisenhower Av</td><td>Yellow</td></tr>
+                            <tr><td>J02</td><td>Van Dorn St</td><td>Blue</td></tr>
+                            <tr><td>K01</td><td>Court House</td><td>Orange/Silver</td></tr>
+                            <tr><td>K02</td><td>Clarendon</td><td>Orange/Silver</td></tr>
+                            <tr><td>K03</td><td>Virginia Sq-GMU</td><td>Orange/Silver</td></tr>
+                            <tr><td>K04</td><td>Ballston-MU</td><td>Orange/Silver</td></tr>
+                            <tr><td>K05</td><td>East Falls Church</td><td>Orange/Silver</td></tr>
+                        </tbody>
+                    </table>
+                    <table class="mini-table">
+                        <caption>DC trunk (toward downtown)</caption>
+                        <thead><tr><th>Code</th><th>Station</th></tr></thead>
+                        <tbody>
+                            <tr><td>C01</td><td>Metro Center</td></tr>
+                            <tr><td>C02</td><td>McPherson Sq</td></tr>
+                            <tr><td>C03</td><td>Farragut West</td></tr>
+                            <tr><td>C04</td><td>Foggy Bottom-GWU</td></tr>
+                            <tr><td>D01</td><td>Federal Triangle</td></tr>
+                            <tr><td>D02</td><td>Smithsonian</td></tr>
+                            <tr><td>D03</td><td>L'Enfant Plaza</td></tr>
+                            <tr><td>D04</td><td>Federal Center SW</td></tr>
+                            <tr><td>D05</td><td>Capitol South</td></tr>
+                            <tr><td>D06</td><td>Eastern Market</td></tr>
+                            <tr><td>D07</td><td>Potomac Ave</td></tr>
+                            <tr><td>D08</td><td>Stadium-Armory</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="hint">
+                    Station codes go straight into the API:
+                    <code>GetPrediction/C05,K01,K02,K04</code>. Red Line uses <code>A##</code>/<code>B##</code>;
+                    Green/Yellow <code>E##</code>/<code>F##</code>; Silver far west <code>N##</code>.
+                </p>
+            </details>
+
+        </main>
+
+        <footer class="app-footer">
+            <p>
+                Data: <a href="https://developer.wmata.com/" target="_blank" rel="noopener">WMATA Developer API</a>
+                · <a href="https://metropulse.wmata.com/rail" target="_blank" rel="noopener">MetroPulse</a>
+                · rail GTFS static feed. Unofficial hobby project — not affiliated with WMATA.
+                Predictions refresh every 25&nbsp;s; WMATA dashboards poll every 20&nbsp;s.
+            </p>
+        </footer>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
+
