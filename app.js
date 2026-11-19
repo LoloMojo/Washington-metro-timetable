@@ -344,6 +344,23 @@ function serviceClock(dayType, totalMinutes) {
     return totalMinutes < start ? totalMinutes + 1440 : totalMinutes;
 }
 
+/* Live board arrival column: 24-hour, zero-padded, Washington-DC wall clock.
+   Cached once — updateCountdowns() calls this every second for every row.
+   hourCycle 'h23' (not hour12:false) keeps midnight as "00:xx" instead of "24:xx". */
+let arrivalClockFormatter = null;
+function getArrivalClockFormatter() {
+    if (!arrivalClockFormatter) {
+        arrivalClockFormatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: DC_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+        });
+    }
+    return arrivalClockFormatter;
+}
+
+function formatArrivalClock(epochMs) {
+    return getArrivalClockFormatter().format(new Date(epochMs));
+}
+
 function stationLines(id) {
     const station = STATIONS[id];
     if (!station) return [];
@@ -482,7 +499,10 @@ const STORAGE_KEY = 'wmataTimetableKey';
 const STORAGE_STATION = 'wmataTimetableStation';
 const STORAGE_TRIP = 'wmataTimetableTrip';
 const STORAGE_DAY = 'wmataTimetableDay';
-const REFRESH_SECONDS = 25;
+// 20s -> ~4,320 calls/day worst case (tab open 24/7), ~9% of WMATA's
+// Default Tier limit of 50,000 calls/day. Polls only while the Live tab is
+// active and the page is visible, so real usage is far lower.
+const REFRESH_SECONDS = 20;
 
 function readJSON(key, fallback) {
     try {
@@ -553,7 +573,9 @@ const alertList        = document.getElementById('alertList');
 /* ---------- State ---------- */
 const state = {
     tab: 'live',
-    station: 'rosslyn',
+    /* Crystal City (C09) is the default only on a fresh profile or after clearing
+       wmataTimetableStation / wmataTimetableTrip — a saved choice always wins (see init()). */
+    station: 'crystal-city',
     activeLines: null,       // Set of line codes; null = every line at the station
     destinationFilter: '',
     predictions: [],
@@ -562,7 +584,7 @@ const state = {
     refreshIn: REFRESH_SECONDS,
     alertsLoaded: false,
     trip: {
-        origin: 'rosslyn',
+        origin: 'crystal-city',
         dest: 'metro-center',
         date: '',
         dayType: 'auto',
@@ -701,10 +723,16 @@ function renderBoard() {
         const metaBits = [];
         if (t.cars) metaBits.push(escapeHtml(t.cars) + ' cars');
         if (t.simulated) metaBits.push('simulated');
+        /* ARR/BRD trains are boarding now, so their clock cell shows the current
+           DC time; rows without an arrival time fall back to an em dash. */
+        const arrivalText = t.arrivalAt
+            ? escapeHtml(formatArrivalClock(t.arrivalAt))
+            : (isStatic ? escapeHtml(formatArrivalClock(Date.now())) : '—');
 
         return '<div class="board-row' + (soon ? ' is-soon' : '') + '"' +
                ' style="border-left-color:' + meta.color + '"' +
-               (t.arrivalAt ? ' data-arrival="' + t.arrivalAt + '"' : '') + '>' +
+               (t.arrivalAt ? ' data-arrival="' + t.arrivalAt + '"' : '') +
+               (isStatic ? ' data-boarding="1"' : '') + '>' +
                '<div>' + linePill(t.line) + '</div>' +
                '<div class="board-dest">' +
                    '<div class="dest-name">' + escapeHtml(t.destination || '—') + '</div>' +
@@ -715,6 +743,7 @@ function renderBoard() {
                         ? escapeHtml(t.minText)
                         : (mins === 0 ? 'Now' : mins) + '<span class="unit">min</span>') +
                '</div>' +
+               '<div class="arrival-clock">' + arrivalText + '</div>' +
                '<div class="cars">' + escapeHtml(t.group || '') + '</div>' +
                '</div>';
     }).join('');
@@ -722,20 +751,32 @@ function renderBoard() {
     updateCountdowns();
 }
 
-/* Tick the countdowns locally between API polls. */
+/* Tick the countdowns locally between API polls — no network calls in here. */
 function updateCountdowns() {
-    const rows = boardEl.querySelectorAll('.board-row[data-arrival]');
+    const rows = boardEl.querySelectorAll('.board-row');
     Array.prototype.forEach.call(rows, function (row) {
         const arrival = Number(row.dataset.arrival);
-        if (!arrival) return;
         const minutesEl = row.querySelector('.minutes');
-        if (!minutesEl) return;
-        const mins = Math.max(0, Math.round((arrival - Date.now()) / 60000));
-        minutesEl.innerHTML = mins <= 0
-            ? 'Now<span class="unit">boarding</span>'
-            : mins + '<span class="unit">min</span>';
-        minutesEl.classList.toggle('is-now', mins <= 1);
-        row.classList.toggle('is-soon', mins <= 2);
+        const arrivalEl = row.querySelector('.arrival-clock');
+
+        if (arrival) {
+            const mins = Math.max(0, Math.round((arrival - Date.now()) / 60000));
+            if (minutesEl) {
+                minutesEl.innerHTML = mins <= 0
+                    ? 'Now<span class="unit">boarding</span>'
+                    : mins + '<span class="unit">min</span>';
+                minutesEl.classList.toggle('is-now', mins <= 1);
+            }
+            row.classList.toggle('is-soon', mins <= 2);
+            if (arrivalEl) arrivalEl.textContent = formatArrivalClock(arrival);
+            return;
+        }
+
+        if (arrivalEl) {
+            arrivalEl.textContent = row.dataset.boarding
+                ? formatArrivalClock(Date.now())
+                : '—';
+        }
     });
 }
 
@@ -1585,7 +1626,7 @@ function init() {
         });
     }
     if (!state.trip.date) state.trip.date = todayISO();
-    if (!STATIONS[state.trip.origin]) state.trip.origin = 'rosslyn';
+    if (!STATIONS[state.trip.origin]) state.trip.origin = 'crystal-city';
     if (!STATIONS[state.trip.dest] || state.trip.dest === state.trip.origin) state.trip.dest = 'metro-center';
 
     populateStations();

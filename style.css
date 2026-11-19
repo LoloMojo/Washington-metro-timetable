@@ -509,7 +509,7 @@ summary:focus-visible {
 
 .board-row {
     display: grid;
-    grid-template-columns: 74px 1fr auto auto;
+    grid-template-columns: 74px 1fr auto auto auto;
     align-items: center;
     gap: 0.85rem;
     background: rgba(255, 255, 255, 0.045);
@@ -571,6 +571,17 @@ summary:focus-visible {
 .minutes.is-now {
     color: var(--good);
     animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* Arrival wall clock (24h, DC time) — secondary to the minutes countdown. */
+.arrival-clock {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    min-width: 46px;
+    white-space: nowrap;
 }
 
 .cars {
@@ -1011,13 +1022,18 @@ summary:focus-visible {
     }
 
     .board-row {
-        grid-template-columns: 58px 1fr auto;
+        grid-template-columns: 58px 1fr auto auto;
         gap: 0.6rem;
         padding: 0.55rem 0.65rem;
     }
 
     .board-row .cars {
         display: none;
+    }
+
+    .arrival-clock {
+        font-size: 0.74rem;
+        min-width: 42px;
     }
 
     .line-pill {
