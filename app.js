@@ -297,13 +297,21 @@ function dayTypeForDate(iso) {
 }
 
 /* Washington, DC wall-clock time, independent of the machine's timezone. */
+let dcClockFormatter = null;
+function getDCClockFormatter() {
+    if (!dcClockFormatter) {
+        dcClockFormatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: DC_TZ, hour12: false, hour: '2-digit', minute: '2-digit',
+            second: '2-digit', year: 'numeric', month: '2-digit', day: '2-digit'
+        });
+    }
+    return dcClockFormatter;
+}
+
 function nowInDC() {
     let parts;
     try {
-        parts = new Intl.DateTimeFormat('en-US', {
-            timeZone: DC_TZ, hour12: false, hour: '2-digit', minute: '2-digit',
-            second: '2-digit', year: 'numeric', month: '2-digit', day: '2-digit'
-        }).formatToParts(new Date());
+        parts = getDCClockFormatter().formatToParts(new Date());
     } catch (err) {
         const d = new Date();
         return {
@@ -325,6 +333,15 @@ function nowInDC() {
         iso: get('year') + '-' + get('month') + '-' + get('day'),
         total: h * 60 + m
     };
+}
+
+/* Map a wall-clock minute (0..1439) onto the service-day counter used by the
+   schedule (05:00 -> 25:00). A time before the first train belongs to the
+   previous day's tail, e.g. 00:30 becomes 24:30 = 1470, so late-night trains
+   still match. */
+function serviceClock(dayType, totalMinutes) {
+    const start = (SERVICE[dayType] || SERVICE.weekday).start;
+    return totalMinutes < start ? totalMinutes + 1440 : totalMinutes;
 }
 
 function stationLines(id) {
@@ -426,7 +443,7 @@ function scheduledDepartures(originId, destId, dayType, fromMin, toMin) {
 
 /* Next departures per line from a station, used when the API is unreachable. */
 function simulatedPredictions(stationId, dayType) {
-    const now = nowInDC().total;
+    const now = serviceClock(dayType, nowInDC().total);
     const trains = [];
 
     stationLines(stationId).forEach(function (line) {
@@ -748,7 +765,10 @@ function updateLiveMeta() {
         return;
     }
     const at = new Date(state.fetchedAt);
-    const stamp = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const stamp = at.toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false, timeZone: DC_TZ
+    });
     liveMeta.textContent = 'Updated ' + stamp + ' · refresh in ' + state.refreshIn + 's';
 }
 
@@ -782,8 +802,12 @@ function renderTimetable() {
     }
 
     const dayType = trip.dayType === 'auto' ? dayTypeForDate(trip.date) : trip.dayType;
-    const from = Math.min(trip.from, trip.to);
-    const to = Math.max(trip.from, trip.to);
+    /* The schedule counts past midnight (05:00 -> 25:00). Lift the requested
+       window onto that counter so an after-midnight span (00:00-01:30) or a
+       span drawn across midnight (23:00-00:30) still matches late trains. */
+    let from = serviceClock(dayType, trip.from);
+    let to = serviceClock(dayType, trip.to);
+    if (to < from) to += 1440;
     const departures = scheduledDepartures(trip.origin, trip.dest, dayType, from, to);
 
     ttSummary.innerHTML = '<strong>' + departures.length + '</strong> direct departures · ' +
@@ -806,6 +830,7 @@ function renderTimetable() {
         .filter(function (g) { return g > 0; });
     const avgGap = gaps.length ? gaps.reduce(function (a, b) { return a + b; }, 0) / gaps.length : 0;
     const now = nowInDC();
+    const nowTotal = serviceClock(dayType, now.total);
     const isToday = trip.date === now.iso;
 
     ttStats.innerHTML =
@@ -824,9 +849,9 @@ function renderTimetable() {
 
     let nextMarked = false;
     ttList.innerHTML = departures.map(function (d) {
-        const isNext = isToday && !nextMarked && d.dep >= now.total;
+        const isNext = isToday && !nextMarked && d.dep >= nowTotal;
         if (isNext) nextMarked = true;
-        const inMinutes = isToday ? d.dep - now.total : null;
+        const inMinutes = isToday ? d.dep - nowTotal : null;
 
         return '<div class="tt-row' + (isNext ? ' is-next' : '') + '">' +
             '<div class="tt-time">' + formatClock(d.dep) +
@@ -1004,16 +1029,19 @@ function describeApiError(err) {
     return (err && err.message) || 'unknown error';
 }
 
-/* Format WMATA's DateUpdated values ("2026-11-18T12:07:15") for humans. */
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/* WMATA's DateUpdated values ("2026-11-18T12:07:15") are already Washington,
+   DC wall-clock time. Format the fields literally instead of re-parsing with
+   the browser timezone, which would shift the time for anyone outside DC. */
 function formatAlertTime(value) {
     if (!value) return '';
     const text = String(value);
-    if (!/^\d{4}-\d{2}-\d{2}T/.test(text)) return text;
-    const date = new Date(text);
-    if (isNaN(date.getTime())) return text.replace('T', ' ').slice(0, 16);
-    return date.toLocaleString([], {
-        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(text);
+    if (!match) return text;
+    const month = MONTH_ABBR[Number(match[2]) - 1] || match[2];
+    return month + ' ' + Number(match[3]) + ', ' + match[4] + ':' + match[5];
 }
 
 async function loadAlerts() {
