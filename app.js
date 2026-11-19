@@ -723,11 +723,12 @@ function renderBoard() {
         const metaBits = [];
         if (t.cars) metaBits.push(escapeHtml(t.cars) + ' cars');
         if (t.simulated) metaBits.push('simulated');
-        /* ARR/BRD trains are boarding now, so their clock cell shows the current
-           DC time; rows without an arrival time fall back to an em dash. */
-        const arrivalText = t.arrivalAt
-            ? escapeHtml(formatArrivalClock(t.arrivalAt))
-            : (isStatic ? escapeHtml(formatArrivalClock(Date.now())) : '—');
+        /* Boarding trains (ARR/BRD) have no meaningful arrival time — show the
+           live DC clock so the cell ticks like the header clock. Other rows show
+           the fixed arrival = poll time + Min. */
+        const arrivalText = isStatic
+            ? escapeHtml(formatArrivalClock(Date.now()))
+            : (t.arrivalAt ? escapeHtml(formatArrivalClock(t.arrivalAt)) : '—');
 
         return '<div class="board-row' + (soon ? ' is-soon' : '') + '"' +
                ' style="border-left-color:' + meta.color + '"' +
@@ -768,7 +769,13 @@ function updateCountdowns() {
                 minutesEl.classList.toggle('is-now', mins <= 1);
             }
             row.classList.toggle('is-soon', mins <= 2);
-            if (arrivalEl) arrivalEl.textContent = formatArrivalClock(arrival);
+            /* Boarding rows carry data-arrival (= poll time), so key off
+               data-boarding first — otherwise this cell freezes until the
+               next poll instead of ticking with the header clock. */
+            if (arrivalEl) {
+                arrivalEl.textContent = formatArrivalClock(
+                    row.dataset.boarding ? Date.now() : arrival);
+            }
             return;
         }
 
